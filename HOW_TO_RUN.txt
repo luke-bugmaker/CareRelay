@@ -1,9 +1,34 @@
 CareRelay - how to run it, and how to wipe the demo data
 =========================================================
 Last updated: 2026-07-26
+Last verified running: 2026-07-26, Azure AI Foundry gpt-5-mini (section 0b)
 
 All paths below are relative to this folder (CareRelay/).
 You need TWO terminals: one for the backend, one for the frontend.
+
+
+-----------------------------------------------------------------
+SHORTCUT - DOUBLE-CLICK CareRelay.bat INSTEAD
+-----------------------------------------------------------------
+
+CareRelay.bat sits in this folder and does the typing for you:
+
+    [1]  Start CareRelay      - sets up the Python environment and
+                                the npm packages on first run, opens
+                                both windows, waits for the API, says
+                                whether real AI is connected, opens
+                                the browser.
+    [2]  Reset the demo data  - stops the backend, deletes the
+                                database and the uploaded photos, and
+                                puts the browser command for the chat
+                                bubbles on your clipboard.
+    [0]  Exit
+
+Option 2 is also how you delete tasks: the UI has no delete button
+for them, so wiping the database is the way to clear the schedule.
+
+The rest of this file is the same work done by hand, plus every
+setting the launcher does not cover.
 
 
 -----------------------------------------------------------------
@@ -26,6 +51,7 @@ If .env is missing, copy .env.example to .env and edit that.
 Any OpenAI-compatible provider works - only BASE_URL and MODEL change:
 
     OpenAI      https://api.openai.com/v1                          gpt-4o-mini
+    Foundry     https://<resource>.services.ai.azure.com/openai/v1 <deployment name>
     DeepSeek    https://api.deepseek.com/v1                        deepseek-chat
     Qwen        https://dashscope.aliyuncs.com/compatible-mode/v1  qwen-plus
     Moonshot    https://api.moonshot.cn/v1                         moonshot-v1-8k
@@ -34,6 +60,55 @@ Any OpenAI-compatible provider works - only BASE_URL and MODEL change:
 
 Leaving AI_API_KEY empty is allowed. The app still starts, it just uses a
 small offline keyword parser instead of real AI.
+
+
+-----------------------------------------------------------------
+0b. IF YOUR KEY IS FROM AZURE AI FOUNDRY
+-----------------------------------------------------------------
+
+This is the setup this project was last tested on, so it gets its own
+section. No Azure CLI, no "az login", no azure-identity package - the
+plain API key is all you need.
+
+In the Foundry portal:
+
+    Deployments -> click your model -> Playground -> "Call model" tab
+
+Copy the two boxes on that panel:
+
+    Project endpoint  ->  goes in AI_BASE_URL
+    API Key           ->  goes in AI_API_KEY   (click the eye icon to reveal)
+
+Ignore the Python sample underneath them. Its "Authentication method"
+dropdown defaults to "Entra ID authentication", which needs az login.
+Switch nothing - CareRelay uses key authentication against the exact
+same endpoint.
+
+Resulting .env:
+
+    AI_API_KEY=<the API Key you copied>
+    AI_BASE_URL=https://<your-resource>.services.ai.azure.com/openai/v1
+    AI_MODEL=gpt-5-mini
+
+(<your-resource> is whatever the Project endpoint box showed. The real
+values for this machine are already in CareRelay\.env, which is
+gitignored - these two files are public, so they keep placeholders.)
+
+Two ways this goes wrong:
+
+  * The endpoint MUST end in /openai/v1. Drop that suffix and every
+    call comes back 404.
+  * AI_MODEL is the DEPLOYMENT name shown in the Deployments list, not
+    the model name from the catalogue. They usually match, but if you
+    renamed the deployment, the deployment name wins.
+
+Speed: gpt-5-mini is a reasoning model, so it thinks before answering.
+Measured on 2026-07-26: 6-13 seconds per chat message, about 35 seconds
+for a handoff summary over a busy day. Slow is expected here, not broken.
+
+Cost note: a workshop / lab Foundry resource can be deleted or run out
+of quota once the workshop ends. If everything suddenly returns 401 or
+404 having worked before, check the deployment still exists in the portal.
 
 
 -----------------------------------------------------------------
@@ -48,7 +123,7 @@ Leave it running. Stop it with Ctrl+C.
 Check it worked - open http://localhost:8000/health
 You should see:
 
-    {"status":"ok","ai_configured":true,"ai_model":"gpt-4o-mini"}
+    {"status":"ok","ai_configured":true,"ai_model":"gpt-5-mini"}
 
   "ai_configured": true   -> real AI
   "ai_configured": false  -> NOT the real AI. The app silently falls
@@ -85,6 +160,9 @@ crashed - look at terminal 1.
 
 There are TWO separate places data is stored. Clearing one does not clear
 the other. For a totally fresh demo, do both.
+
+CareRelay.bat option 2 does 3b for you and hands you 3a on the
+clipboard. What follows is the manual version.
 
 --- 3a. The chat bubbles on screen (stored in your browser) ---
 
@@ -125,6 +203,12 @@ It re-creates the database automatically and re-seeds the demo data:
 Amy and Ben, one breakfast event at 08:30, and one physiotherapy
 appointment tomorrow at 15:00. That physio slot is what the demo's
 schedule-conflict step clashes with, so do not delete it by hand.
+
+IMPORTANT for the demo: seeding only happens when the database has no
+caregivers in it. Keep yesterday's care_relay.db and you keep yesterday's
+timestamps - the seeded physio is then "today at 15:00", not "tomorrow",
+and step 3 of the demo produces no conflict card. Delete the database on
+the morning of a demo.
 
 
 -----------------------------------------------------------------
@@ -180,10 +264,25 @@ health says "ai_configured": false
 
 Backend log shows 401 / "invalid api key"
     The key does not belong to the provider in AI_BASE_URL. Both must
-    come from the same provider.
+    come from the same provider. An Azure Foundry key against
+    api.openai.com is the usual version of this mistake.
 
 Backend log shows 404 / "model not found"
     AI_MODEL is not a model that provider serves. Check their model list.
+    On Azure Foundry, also check AI_BASE_URL still ends in /openai/v1 and
+    that AI_MODEL is the deployment name.
+
+Backend log shows 400 "Unsupported parameter: 'max_tokens'"
+    A reasoning model (gpt-5*, o-series) refuses that older parameter and
+    wants max_completion_tokens. llm_client.warmup() already tries the new
+    name first and falls back, so this should only show up in code you add.
+
+Chat works but every message takes 10+ seconds
+    Normal on a reasoning model. Point AI_MODEL at a non-reasoning model
+    (gpt-4o-mini, deepseek-chat) if you want snappier demo answers.
+
+Step 3 of the demo shows no conflict card
+    The database is older than today. See section 3b.
 
 Photo does not appear on the Care Board
     Uploading needs the backend running. In "Demo data" mode the photo
@@ -199,5 +298,11 @@ Everything looks stale after editing code
 -----------------------------------------------------------------
 
 Usage and spend live in your provider's own dashboard (OpenAI platform
-usage page, DeepSeek console, DashScope console, and so on). CareRelay
-sends one request per chat message and one per handoff.
+usage page, DeepSeek console, DashScope console, Azure Foundry's Monitor
+tab, and so on). CareRelay sends one request per chat message and one
+per handoff.
+
+Never commit the key. CareRelay\.env is gitignored for exactly this
+reason - do not move the key into .env.example, README.md or any file
+that is tracked. If a key ever does reach a screenshot or a commit,
+regenerate it in the provider's portal rather than deleting the file.

@@ -153,11 +153,23 @@ async def warmup() -> None:
         return
     try:
         client = get_client()
-        await client.chat.completions.create(
-            model=settings.ai_model,
-            messages=[{"role": "user", "content": "ok"}],
-            max_tokens=1,
-        )
+        try:
+            # Reasoning models (gpt-5*, o-series) reject the older `max_tokens`
+            # outright; most other providers still only understand that name.
+            # The cap is 16 rather than 1 because a reasoning model that hits the
+            # limit before emitting a token answers with a 400 instead of an
+            # empty message, and warmup only cares that the round trip works.
+            await client.chat.completions.create(
+                model=settings.ai_model,
+                messages=[{"role": "user", "content": "ok"}],
+                max_completion_tokens=16,
+            )
+        except BadRequestError:
+            await client.chat.completions.create(
+                model=settings.ai_model,
+                messages=[{"role": "user", "content": "ok"}],
+                max_tokens=16,
+            )
         logger.info("AI client warmed up (model=%s)", settings.ai_model)
     except Exception:  # noqa: BLE001 - warmup must never break startup
         logger.warning("AI warmup failed; first request will be slow", exc_info=True)

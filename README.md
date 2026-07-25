@@ -80,6 +80,25 @@ Pending approvals expire after 15 minutes and are held in memory, so restarting 
 
 You need **Node.js 20+**. For the real backend you also need **Python 3.11+** (3.13 recommended) and an API key from any OpenAI-compatible provider.
 
+### Option 0 — Windows: just double-click `CareRelay.bat`
+
+```text
+  [1]  Start CareRelay      (backend + frontend)
+  [2]  Reset the demo data  (chat history + tasks + photos)
+  [0]  Exit
+```
+
+**1** creates the Python environment and installs the npm packages if they are
+missing, opens the backend and the frontend in their own windows, waits until the
+API answers, tells you whether real AI is connected, then opens the browser.
+
+**2** stops the backend, deletes `care_relay.db` and the uploaded photos, and copies
+the one-line browser command to your clipboard for the chat bubbles — those live in
+the browser's own storage, which nothing outside the browser can reach. There is no
+delete button for tasks in the UI, so this is how you clear them.
+
+The two options below are the same thing typed by hand.
+
 ### Option 1 — the app on its own, no backend
 
 Fastest way to see it. No Python, no API key, no internet.
@@ -119,7 +138,7 @@ Open <http://localhost:5173>. The badge should now read **Live backend**.
 Check <http://localhost:8000/health> — you want:
 
 ```json
-{"status":"ok","ai_configured":true,"ai_model":"gpt-4o-mini"}
+{"status":"ok","ai_configured":true,"ai_model":"gpt-5-mini"}
 ```
 
 `ai_configured: false` means the AI is **not** connected; the app silently uses a small keyword parser and still looks like it works. Fix the configuration below rather than trusting the UI.
@@ -139,6 +158,7 @@ Restart uvicorn afterwards; settings are read once at startup.
 | Provider | `AI_BASE_URL` | example `AI_MODEL` |
 |---|---|---|
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| Azure AI Foundry | `https://<resource>.services.ai.azure.com/openai/v1` | your deployment name, e.g. `gpt-5-mini` |
 | DeepSeek | `https://api.deepseek.com/v1` | `deepseek-chat` |
 | Qwen (DashScope) | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-plus` |
 | Moonshot | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
@@ -152,6 +172,33 @@ Providers vary in how well they honour JSON Schema. `llm_client.py` asks for
 `response_format=json_schema` first and retries with `json_object` if the provider
 rejects it, so both kinds work; the schema is repeated in the system prompt either way.
 
+#### Azure AI Foundry
+
+Foundry's newer `/openai/v1` route speaks plain OpenAI, so no Azure SDK and no
+`az login` are involved — the plain API key is enough.
+
+In the Foundry portal: **Deployments → your model → Playground → Call model**.
+Copy **Project endpoint** and **API Key** from that panel. Ignore the Python sample
+shown next to them: it defaults to *Entra ID authentication* and pulls in
+`azure-identity`. Key authentication against the same endpoint is what CareRelay uses.
+
+```env
+AI_API_KEY=<the API Key from that panel>
+AI_BASE_URL=https://<your-resource>.services.ai.azure.com/openai/v1
+AI_MODEL=gpt-5-mini
+```
+
+Two things to know:
+
+- `AI_MODEL` is the **deployment** name, not the catalogue model name. They match by
+  default, but a renamed deployment wins.
+- The endpoint must keep its `/openai/v1` suffix. Without it every call 404s.
+
+Verified working end to end on 2026-07-26 against `gpt-5-mini` — chat extraction,
+symptom clarification, conflict detection and handoff generation all ran live.
+gpt-5-mini is a reasoning model, so it is slower than its size suggests: about
+6-13 s per chat message and around 35 s for a handoff over a busy day.
+
 Full setup notes, including data resets and troubleshooting: [`HOW_TO_RUN.txt`](HOW_TO_RUN.txt).
 
 ---
@@ -163,6 +210,7 @@ Full setup notes, including data resets and troubleshooting: [`HOW_TO_RUN.txt`](
    → an "AI understood" card appears. Press **Confirm** (or **Edit** to correct it first).
 3. Send `Dad has physiotherapy tomorrow at 3 PM.`
    → **Confirm**. It clashes with the physio already on the schedule, so the conflict card appears with Keep both / Replace existing / Discard new.
+   The seeded physio is placed one day after *the day the database was first created*, so this step only clashes if `care_relay.db` was seeded today. On an older database, say `today at 3 PM` instead — or delete the database and let it re-seed.
 4. **Care Board** tab.
    → your events are on the daily timeline, the appointment is under Upcoming tasks.
 5. Press **Generate handoff to Ben**.
@@ -173,7 +221,9 @@ Try Chinese too: `爸爸中午喝了一杯水，看起来比平常累。` — th
 
 Switch the caregiver in the top bar to see the separate-threads model: Ben's chat is his own, but the board is shared.
 
-Live AI takes roughly 2-5 seconds per message. That is normal.
+Live AI takes a few seconds per message — roughly 2-5 s on a small chat model,
+6-13 s on a reasoning model such as gpt-5-mini, and longer again for a handoff
+(~35 s measured) because it reads the whole day. That is normal, not a hang.
 
 The **Plant demo conflict** button on the Care Board (demo mode only) recreates step 3's clash without typing.
 
@@ -191,6 +241,8 @@ location.reload();
 
 **In the backend** — stop uvicorn first, then delete `backend/care_relay.db` and the files in `backend/uploads/` (keep `.gitkeep`). It re-creates and re-seeds on the next start. Both are gitignored, so a fresh clone starts clean anyway.
 
+Seeding is skipped whenever caregivers already exist, so a database left over from a previous day keeps that day's timestamps — which is what makes the conflict step in the walkthrough stop firing. Deleting the file is the fix.
+
 ---
 
 ## Project layout
@@ -203,6 +255,7 @@ CareRelay/
 │       ├── components/    Timeline, ScheduleList, ConflictAlert, HandoffCard, AddTaskForm, …
 │       ├── services/      api.js (live) · mockBackend.js (offline demo)
 │       └── lib/care.js    date and formatting helpers
+├── CareRelay.bat      Windows launcher: start everything / reset the demo data
 ├── backend/
 │   └── app/
 │       ├── main.py        app setup, CORS, /uploads, /health
@@ -251,7 +304,9 @@ Interactive docs while the backend is running: <http://localhost:8000/docs>
 | Badge stuck on "Demo data" | Backend not answering. Check <http://localhost:8000/health> |
 | `ai_configured: false` | `.env` is missing, or `AI_API_KEY` / `AI_MODEL` is blank. Restart uvicorn after editing |
 | `401` / `invalid api key` in the backend log | Wrong key for that `AI_BASE_URL` — key and base URL must be from the same provider |
-| `404 model not found` | `AI_MODEL` is not a model that provider serves |
+| `404 model not found` | `AI_MODEL` is not a model that provider serves. On Azure Foundry it must be the **deployment** name, and `AI_BASE_URL` must end in `/openai/v1` |
+| `400 Unsupported parameter: 'max_tokens'` | A reasoning model (gpt-5*, o-series) reached code that still sends `max_tokens`. `llm_client.warmup()` already falls back to `max_completion_tokens`; anything else sending it needs the same treatment |
+| Step 3 of the walkthrough shows no conflict | The database was seeded on an earlier day, so the seeded physio is no longer "tomorrow". Delete `backend/care_relay.db` and restart, or say `today at 3 PM` |
 | Mic button greyed out | Browser dictation is Chrome / Edge only — type instead |
 | Photo does not appear | Uploading needs the backend. In demo mode the image lives only in the browser and is lost on refresh |
 | Page is blank | F12 → Console → read the first red error |
