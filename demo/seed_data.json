@@ -1,0 +1,13 @@
+{
+  "care_recipient": { "id": "recipient_001", "display_name": "Dad" },
+  "caregivers": [
+    { "id": "caregiver_amy", "name": "Amy", "relationship": "Daughter" },
+    { "id": "caregiver_ben", "name": "Ben", "relationship": "Son" }
+  ],
+  "demo_messages": [
+    "Dad ate half a bowl of porridge at 8:30.",
+    "Dad drank one glass of water at noon.",
+    "Dad took his medicine."
+  ]
+}
+

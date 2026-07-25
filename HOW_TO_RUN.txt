@@ -1,0 +1,203 @@
+CareRelay - how to run it, and how to wipe the demo data
+=========================================================
+Last updated: 2026-07-26
+
+All paths below are relative to this folder (CareRelay/).
+You need TWO terminals: one for the backend, one for the frontend.
+
+
+-----------------------------------------------------------------
+0. FIRST TIME ONLY - PYTHON ENV AND API KEY
+-----------------------------------------------------------------
+
+    cd backend
+    python -m venv .venv
+    .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+Then put your AI key in the .env file in this folder (CareRelay\.env):
+
+    AI_API_KEY=sk-...
+    AI_BASE_URL=https://api.openai.com/v1
+    AI_MODEL=gpt-4o-mini
+
+.env is gitignored. It is never committed and never pushed to GitHub.
+If .env is missing, copy .env.example to .env and edit that.
+
+Any OpenAI-compatible provider works - only BASE_URL and MODEL change:
+
+    OpenAI      https://api.openai.com/v1                          gpt-4o-mini
+    DeepSeek    https://api.deepseek.com/v1                        deepseek-chat
+    Qwen        https://dashscope.aliyuncs.com/compatible-mode/v1  qwen-plus
+    Moonshot    https://api.moonshot.cn/v1                         moonshot-v1-8k
+    OpenRouter  https://openrouter.ai/api/v1                       <vendor>/<model>
+    Ollama      http://localhost:11434/v1                          qwen2.5
+
+Leaving AI_API_KEY empty is allowed. The app still starts, it just uses a
+small offline keyword parser instead of real AI.
+
+
+-----------------------------------------------------------------
+1. START THE BACKEND  (terminal 1)
+-----------------------------------------------------------------
+
+    cd backend
+    .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload
+
+Leave it running. Stop it with Ctrl+C.
+
+Check it worked - open http://localhost:8000/health
+You should see:
+
+    {"status":"ok","ai_configured":true,"ai_model":"gpt-4o-mini"}
+
+  "ai_configured": true   -> real AI
+  "ai_configured": false  -> NOT the real AI. The app silently falls
+                             back to a small keyword parser and still
+                             looks like it works. See section 5.
+
+Settings are read once at startup, so restart uvicorn after editing .env.
+
+
+-----------------------------------------------------------------
+2. START THE FRONTEND  (terminal 2)
+-----------------------------------------------------------------
+
+    cd frontend
+    npm run dev
+
+Then open:  http://localhost:5173
+
+First time only, run "npm install" before "npm run dev" (about 15 seconds).
+
+Look at the badge in the top-right corner of the page:
+
+    "Live backend"  -> talking to FastAPI + real AI       <- what you want
+    "Demo data"     -> backend not reachable, using fake
+                       in-browser data instead
+
+If it says "Demo data" while the backend IS running, the backend probably
+crashed - look at terminal 1.
+
+
+-----------------------------------------------------------------
+3. CLEAN THE CHAT HISTORY
+-----------------------------------------------------------------
+
+There are TWO separate places data is stored. Clearing one does not clear
+the other. For a totally fresh demo, do both.
+
+--- 3a. The chat bubbles on screen (stored in your browser) ---
+
+Each caregiver has their own chat thread, saved in the browser's
+localStorage so it survives a page refresh.
+
+In the browser, press F12 to open DevTools, click "Console", paste this
+and press Enter:
+
+    localStorage.removeItem('careRelay.threads');
+    localStorage.removeItem('careRelay.caregiverId');
+    location.reload();
+
+The chats are now empty and you are asked to pick a caregiver again.
+
+Quick alternative: open the page in a private / incognito window. Nothing
+is kept there at all.
+
+--- 3b. The care events, tasks and photos (stored in the backend) ---
+
+This is the timeline, the upcoming tasks and any uploaded photos.
+
+  1. Stop the backend in terminal 1 (Ctrl+C).
+     You MUST stop it first - Windows will not delete a file that a
+     running program still has open.
+
+  2. Delete the database and the uploaded files:
+
+         cd backend
+         del care_relay.db
+         del /q uploads\*.png uploads\*.jpg
+
+     (Do not delete uploads\.gitkeep - git needs it.)
+
+  3. Start the backend again (section 1).
+
+It re-creates the database automatically and re-seeds the demo data:
+Amy and Ben, one breakfast event at 08:30, and one physiotherapy
+appointment tomorrow at 15:00. That physio slot is what the demo's
+schedule-conflict step clashes with, so do not delete it by hand.
+
+
+-----------------------------------------------------------------
+4. THE 2-MINUTE DEMO
+-----------------------------------------------------------------
+
+  1. Chat tab, pick Amy.
+  2. "Dad ate half a bowl of porridge at 8:30."
+     -> an "AI understood" card appears. Press Confirm.
+  3. "Dad has physiotherapy tomorrow at 3 PM."
+     -> Confirm. The clash with the seeded 15:00 physio shows up here,
+        AFTER you press Confirm, not before.
+  4. Care Board tab -> your events are on the timeline.
+  5. Press "Generate handoff to Ben".
+  6. Click a small "source" chip in the summary -> it jumps to the
+     original entry. Hover it to see the caregiver's exact sentence.
+
+Chinese input works too:  爸爸中午喝了一杯水，看起来比平常累。
+
+Note: whether "Dad took his medicine." triggers the "Which medication?"
+question depends on the model you configure. Smaller/faster models often
+record it straight away instead of asking.
+
+Live AI takes a few seconds per message. That is normal, not a hang.
+
+
+-----------------------------------------------------------------
+5. IF SOMETHING IS WRONG
+-----------------------------------------------------------------
+
+"npm is not recognized"
+    Node.js is not installed, or the terminal is older than the install.
+    Open a new terminal.
+
+Port 5173 already in use
+    npm run dev -- --port 5174
+
+Port 8000 already in use
+    An old backend is still running. Close that terminal, or:
+    Windows: netstat -ano | findstr :8000     then stop that PID.
+
+Page is blank
+    Press F12, open Console, read the first red error.
+
+Badge says "Demo data" and will not change
+    The backend is not answering. Check http://localhost:8000/health.
+
+health says "ai_configured": false
+    CareRelay\.env is missing, or AI_API_KEY / AI_MODEL is blank.
+    Copy .env.example to .env, fill it in, restart uvicorn.
+    This file is deliberately NOT in git, so a fresh clone will not
+    have it.
+
+Backend log shows 401 / "invalid api key"
+    The key does not belong to the provider in AI_BASE_URL. Both must
+    come from the same provider.
+
+Backend log shows 404 / "model not found"
+    AI_MODEL is not a model that provider serves. Check their model list.
+
+Photo does not appear on the Care Board
+    Uploading needs the backend running. In "Demo data" mode the photo
+    only lives in the browser and disappears on refresh.
+
+Everything looks stale after editing code
+    Frontend reloads by itself; hard-refresh with Ctrl+Shift+R.
+    Backend only reloads if you started it with --reload.
+
+
+-----------------------------------------------------------------
+6. WATCHING COST
+-----------------------------------------------------------------
+
+Usage and spend live in your provider's own dashboard (OpenAI platform
+usage page, DeepSeek console, DashScope console, and so on). CareRelay
+sends one request per chat message and one per handoff.

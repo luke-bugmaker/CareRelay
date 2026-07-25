@@ -1,0 +1,10 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+sqlalchemy==2.0.41
+pydantic-settings==2.10.1
+python-multipart==0.0.20
+httpx==0.28.1
+pytest==8.4.1
+
+# Any OpenAI-compatible provider is driven through this one SDK.
+openai>=1.60,<2
